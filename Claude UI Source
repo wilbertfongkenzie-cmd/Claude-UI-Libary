@@ -1888,6 +1888,182 @@ end
 
 InitGlobalKeybindListener()
 
+-- ==================== CONDITIONAL KEYBIND (Keybind yang tergantung Toggle) ====================
+function ClaudeUI._TabAPI:AddConditionalKeybind(label, defaultKey, dependsOnToggle, callback, opts)
+    opts = opts or {}
+    local keybind = defaultKey or "F"
+    local listening = false
+    local listeningConnection = nil
+    
+    local container = inst("Frame", {
+        Size = UDim2.new(1, 0, 0, 48),
+        BackgroundColor3 = T.Surface,
+        BorderSizePixel = 0,
+        LayoutOrder = opts.Order or self:_o(),
+        ZIndex = 4,
+        Parent = self._inner,
+    })
+    corner(container, 5)
+    mkStroke(container, T.Border, 1)
+    mkPad(container, 0, 14, 0, 12)
+    
+    local iconW = 0
+    local iconImg = mkIcon(container, opts.Icon or "command", 14, T.TextSecondary, 6, Vector2.new(0, 0.5), UDim2.new(0, 12, 0.5, 0))
+    if iconImg then iconW = 14 + 8 end
+    
+    inst("TextLabel", {
+        Size = UDim2.new(1, -(iconW + 100), 1, 0),
+        Position = UDim2.new(0, iconW, 0, 0),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = T.TextPrimary,
+        TextSize = 13,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 5,
+        Parent = container,
+    })
+    
+    local keyButton = inst("TextButton", {
+        Size = UDim2.new(0, 80, 0, 28),
+        Position = UDim2.new(1, -90, 0.5, -14),
+        BackgroundColor3 = T.SurfaceActive,
+        Text = keybind,
+        TextColor3 = T.TextPrimary,
+        TextSize = 12,
+        Font = Enum.Font.GothamMedium,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        ZIndex = 6,
+        Parent = container,
+    })
+    corner(keyButton, 5)
+    mkStroke(keyButton, T.Border, 1)
+    
+    -- Status indicator (menunjukkan apakah keybind aktif atau tidak)
+    local statusDot = inst("Frame", {
+        Size = UDim2.new(0, 8, 0, 8),
+        Position = UDim2.new(1, -12, 0.5, -4),
+        BackgroundColor3 = dependsOnToggle.Get and (dependsOnToggle.Get() and T.Success or T.Error) or T.Warning,
+        BorderSizePixel = 0,
+        ZIndex = 7,
+        Parent = keyButton,
+    })
+    corner(statusDot, 4)
+    
+    -- Update status dot ketika toggle berubah
+    if dependsOnToggle.Get and dependsOnToggle.Set then
+        local oldSet = dependsOnToggle.Set
+        dependsOnToggle.Set = function(v)
+            oldSet(v)
+            statusDot.BackgroundColor3 = v and T.Success or T.Error
+        end
+    end
+    
+    local function stopListening()
+        if listeningConnection then
+            listeningConnection:Disconnect()
+            listeningConnection = nil
+        end
+        listening = false
+        keyButton.Text = keybind
+        tw(keyButton, fast, { BackgroundColor3 = T.SurfaceActive })
+    end
+    
+    local function startListening()
+        if listening then
+            stopListening()
+            return
+        end
+        
+        listening = true
+        keyButton.Text = "..."
+        tw(keyButton, fast, { BackgroundColor3 = T.Primary })
+        
+        listeningConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+            if gameProcessed then return end
+            
+            local newKey = nil
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                newKey = input.KeyCode.Name
+            elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+                newKey = "MouseLeft"
+            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                newKey = "MouseRight"
+            end
+            
+            if newKey then
+                keybind = newKey
+                stopListening()
+                if callback then callback(keybind) end
+            end
+        end)
+        
+        task.delay(5, function()
+            if listening then stopListening() end
+        end)
+    end
+    
+    keyButton.MouseButton1Click:Connect(startListening)
+    
+    keyButton.MouseEnter:Connect(function()
+        if not listening then
+            tw(keyButton, fast, { BackgroundColor3 = T.SurfaceHover })
+        end
+    end)
+    keyButton.MouseLeave:Connect(function()
+        if not listening then
+            tw(keyButton, fast, { BackgroundColor3 = T.SurfaceActive })
+        end
+    end)
+    
+    return {
+        Get = function() return keybind end,
+        Set = function(k) keybind = k; keyButton.Text = keybind end,
+        IsActive = function() return dependsOnToggle.Get and dependsOnToggle.Get() or false end,
+        UpdateStatus = function() 
+            if dependsOnToggle.Get then
+                statusDot.BackgroundColor3 = dependsOnToggle.Get() and T.Success or T.Error
+            end
+        end
+    }
+end
+
+-- ==================== REGISTER CONDITIONAL KEYBIND ====================
+function ClaudeUI._TabAPI:RegisterConditionalKeybind(keybindObj, dependsOnToggle, actionCallback)
+    -- Daftarkan ke registry dengan pengecekan status toggle
+    table.insert(keybindRegistry, {
+        obj = keybindObj,
+        key = keybindObj.Get(),
+        callback = function()
+            if dependsOnToggle.Get and dependsOnToggle.Get() then
+                pcall(actionCallback)
+            end
+        end
+    })
+    
+    -- Update registry ketika keybind berubah
+    local oldSet = keybindObj.Set
+    keybindObj.Set = function(k)
+        oldSet(k)
+        for i, entry in ipairs(keybindRegistry) do
+            if entry.obj == keybindObj then
+                entry.key = k
+                break
+            end
+        end
+    end
+    
+    -- Update registry ketika toggle berubah
+    if dependsOnToggle.Set then
+        local oldToggleSet = dependsOnToggle.Set
+        dependsOnToggle.Set = function(v)
+            oldToggleSet(v)
+            keybindObj.UpdateStatus()
+        end
+    end
+end
+
 function ClaudeUI._TabAPI:AddLabel(text, opts)
 	opts = opts or {}
 	return inst("TextLabel", {
