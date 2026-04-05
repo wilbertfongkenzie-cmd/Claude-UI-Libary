@@ -1852,6 +1852,42 @@ function ClaudeUI._TabAPI:AddKeybindToggle(label, defaultKey, defaultState, call
     }
 end
 
+local keybindRegistry = {}
+
+function ClaudeUI._TabAPI:RegisterKeybindForPress(keybindObj, key, callback)
+    table.insert(keybindRegistry, {
+        obj = keybindObj,
+        key = key,
+        callback = callback
+    })
+end
+
+-- Inisialisasi global listener (panggil sekali saat UI dibuat)
+local function InitGlobalKeybindListener()
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        local pressedKey = nil
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            pressedKey = input.KeyCode.Name
+        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+            pressedKey = "MouseLeft"
+        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+            pressedKey = "MouseRight"
+        end
+        
+        if pressedKey then
+            for _, entry in ipairs(keybindRegistry) do
+                if entry.key == pressedKey then
+                    pcall(entry.callback)
+                end
+            end
+        end
+    end)
+end
+
+InitGlobalKeybindListener()
+
 function ClaudeUI._TabAPI:AddLabel(text, opts)
 	opts = opts or {}
 	return inst("TextLabel", {
